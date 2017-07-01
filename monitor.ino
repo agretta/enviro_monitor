@@ -11,6 +11,7 @@ byte humid[MAXP];
 int buff;
 int tail;
 int head;
+int req;
 
 void printTemps();
 
@@ -66,14 +67,30 @@ void loop() {
         Serial.print("Unplug Now");
      }
     
-    tail=(tail+1)%MAXP;
-    if(tail==head)head=(tail+1)%MAXP;
-    //Checks for a query, if it exists it retrieves
+    
+    //Checks for a query, if it exists it retrieves n recent ones
+    if(Serial.available()>0){
+    req=Serial.read();
+    }
+    while(req--){
+    if(tail-req>=0){
+    Serial.write(temps[tail-req]);
+    Serial.write(humid[tail-req]);
+    }
+    else{
+    Serial.write(temps[tail-req+MAXP]);
+    Serial.write(humid[tail-req+MAXP]);
+    }
+    }
+
+    
     Serial.print(head);
     Serial.print(tail);
     
     //button interrupt
     delay(10000);
+    tail=(tail+1)%MAXP;
+    if(tail==head)head=(tail+1)%MAXP;
     printTemps();
 
 }
