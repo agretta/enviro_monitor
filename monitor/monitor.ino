@@ -4,7 +4,7 @@
 #include <EEPROM.h>
 #define pinDHT11 2
 #define MAXP 6
-#define BUFFSIZE 3000
+#define BUFFSIZE 30000
 
 SimpleDHT11 dht11;
 byte temps[MAXP];
@@ -14,11 +14,11 @@ int tail;
 int head;
 int req=0;
 
-SoftwareSerial btooth(3,4);
+SoftwareSerial btooth(11,10);
 
 void setup() {
     btooth.begin(9600);
-   // Serial.begin(9600);
+    Serial.begin(9600);
     //attachInterrupt(digitalPinToInterrupt(button), printTemps, CHANGE);
     //reads from EEPROM
     head=(EEPROM.read(MAXP<<1))*2*2*2*2*2*2*2*2+EEPROM.read(MAXP<<1|1);
@@ -70,28 +70,32 @@ void loop() {
     
     
     //Checks for a query, if it exists it retrieves n recent ones
+    btooth.listen();
+
     if(btooth.available()>0){
-    req=btooth.read();
+      req=btooth.read();
+      //btooth.write(req);
+      Serial.println("Checking");
     }
     while(req){
       req--;
-     // Serial.println("Writing");
-    if(tail-req>=0){
-    btooth.write(temps[tail-req]);
-    btooth.write(humid[tail-req]);
-    }
-    else{
-    btooth.write(temps[tail-req+MAXP]);
-    btooth.write(humid[tail-req+MAXP]);
-    }
+      // Serial.println("Writing");
+      if(tail-req>=0){
+        btooth.write(temps[tail-req]);
+        btooth.write(humid[tail-req]);
+      }
+      else{
+        btooth.write(temps[tail-req+MAXP]);
+        btooth.write(humid[tail-req+MAXP]);
+      }
     }
 
     
-  //  Serial.print(head);
+    //Serial.print(head);
     //Serial.print(tail);
     
     //button interrupt
-    delay(10000);
+    delay(1000);
     tail=(tail+1)%MAXP;
     if(tail==head)head=(tail+1)%MAXP;
     //printTemps();
