@@ -3,6 +3,7 @@
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #define pinDHT11 2
+//Note: changing MAXP may cause data loss
 #define MAXP 6
 #define BUFFSIZE 30000
 
@@ -74,22 +75,11 @@ void loop() {
 
     if(btooth.available()>0){
       req=btooth.read();
+      if(req>MAXP)req=MAXP;
       //btooth.write(req);
       Serial.println("Checking");
     }
-    while(req){
-      req--;
-      // Serial.println("Writing");
-      if(tail-req>=0){
-        btooth.write(temps[tail-req]);
-        btooth.write(humid[tail-req]);
-      }
-      else{
-        btooth.write(temps[tail-req+MAXP]);
-        btooth.write(humid[tail-req+MAXP]);
-      }
-    }
-
+    
     
     //Serial.print(head);
     //Serial.print(tail);
@@ -101,8 +91,125 @@ void loop() {
     //printTemps();
 
 }
+
+/*
+ * Reads, parses, and executes commands from the bluetooth connection
+ * Each has the following format:
+ * [type char][some bytes]
+ * The type char distinguishes the type of command, while the bytes provide parameters for the command.
+ * When the command sends back data, it prefaces the data with an error number (note that command-specific errors are checked in 
+ * increasing order.)
+ * 0 = no error.
+ * 10 = unable to parse command.
+ * Sent data always has the format [most historic temp][most historic humidity][next most historic temp]...
+ * The other error numbers are command specific.
+ * Commands
+ * [u][byte 1][byte 2]: Sends the [[byte 1][byte 2]] most recently read values. 
+ * 1 = user requested more data than has been read.
+ * 2 = user requested more data than the buffer could possibly hold.
+ * [r][byte 1][byte 2][byte 3][byte 4] : Sends the values in the range [s,f] (starting with s and then ending on f) inclusive, 
+ * s=[[byte 1][byte 2]],f=[[byte 1][byte 2]] where sand f are the number of values between the most historic recorded value
+ * and themselves.
+ * 3 = user sent range that doesn't exist (e.g. f<s).
+ * 4 = user sent range that is greater than what has been read.
+ * 5 = user sent range that is greater than what could possibly be read.
+ * [a] : Sends all the values that have been read
+ */
+
+int readCommand(){
+int err;
+if(btooth.available()>0){
+  char c=btooth.read();
+  if(c=='u')err=updateValues();
+  else if(c=='r')err=rangeValues();
+  else if(c=='a')err=all();
+  else err=10;
+  if(err==10){
+    btooth.write(10);
+    return -1;
+  }
+  return 1;
+}
+return 0;
+}
+
+int updateValues(){
+if(btooth.available()>1){
+  int a=btooth.read();
+  int b=btooth.read();
+  int dist=tail-head+1;
+  if(dist<=0)dist=MAXP;
+  int count=a<<8+b;
+  if(count>MAXP)btooth.write((byte)2);
+  else if(count>dist)btooth.write((byte)1);
+  else{
+    btooth.write((byte)0);
+    while(count--){
+          // Serial.println("Writing");
+          if(tail-count>=0){
+            btooth.write(temps[tail-count]);
+            btooth.write(humid[tail-count]);
+          }
+          else{
+            btooth.write(temps[tail-count+MAXP]);
+            btooth.write(humid[tail-count+MAXP]);
+          }
+        }
+  }
+  return 0;
+}
+else return 10;
+}
+
+int rangeValues(){
+if(btooth.available()>3){
+  int a=btooth.read();
+  int b=btooth.read();
+  int s=a<<8+b;
+  a=btooth.read();
+  b=btooth.read();
+  int f=a<<8<<b;
+  int dist=tail-head+1;
+  if(dist<=0)dist=MAXP;
+  if(f<s)btooth.write((byte)3);
+  else if(f>=dist)btooth.write((byte)4);
+  else if(s<0||f<0)btooth.write((byte)5);
+  else{
+    btooth.write((byte)0);
+    bool v=true;
+    s=(s+head)%MAXP;
+    f=(f+head)%MAXP;
+  while(v){
+    if(s==f)v=false;
+    btooth.write(temps[s]);
+    btooth.write(humid[s]);
+    s=(s+1)%MAXP;
+  }
+  }
+  return 0;
+}
+else return 10;
+}
+
+int all(){
+btooth.write((byte)0);
+int h=head;
+int t=tail;
+bool v=true;
+while(v){
+  if(h==t)v=false;
+  btooth.write(temps[h]);
+  btooth.write(humid[h]);
+  h=(h+1)%MAXP; 
+}
+return 0;
+}
+
+
+
+
 void loadFromMemory(){
-int t=EEPROM.read((MAXP<<1)+2)*2*2*2*2*2*2*2*2+EEPROM.read((MAXP<<1)+3);
+    int t=EEPROM.read((MAXP<<1)+2)*2*2*2*2*2*2*2*2+EEPROM.read((MAXP<<1)+3);
     int r=EEPROM.read(MAXP<<1)*2*2*2*2*2*2*2*2+EEPROM.read(MAXP<<1|1);
     int point=(head-1);
     if(point==-1)point=MAXP-1;
