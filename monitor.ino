@@ -3,9 +3,9 @@
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 #define pinDHT11 2
-#define PERIOD 30000
+#define PERIOD 3000
 //Note: changing MAXP may cause data loss
-#define MAXP 6
+#define MAXP 20
 #define BUFFSIZE 3000000
 
 SimpleDHT11 dht11;
@@ -75,7 +75,6 @@ void loop() {
     btooth.listen();
 
     readCommand();
-    
     //Serial.print(head);
     //Serial.print(tail);
     
@@ -116,9 +115,12 @@ int readCommand(){
 int err;
 if(btooth.available()>0){
   char c=btooth.read();
+  Serial.print("Command type:");
+  Serial.println(c);
   if(c=='u')err=updateValues();
   else if(c=='r')err=rangeValues();
   else if(c=='a')err=all();
+  else if(c=='p')err=sendPeriod();
   else err=10;
   if(err==10){
     btooth.write(10);
@@ -129,27 +131,37 @@ if(btooth.available()>0){
 return 0;
 }
 
-int readPeriod(){
+int sendPeriod(){
 btooth.write((byte)0);
 int a=PERIOD;
 byte secondbyte=a;
 a=a>>8;
-byte firstbyte=(a);
+byte firstbyte=a;
 btooth.write(firstbyte);
+Serial.println(firstbyte);
 btooth.write(secondbyte);
+Serial.println(secondbyte);;
+return 0;
 }
 
 int updateValues(){
 if(btooth.available()>1){
+  Serial.println("Updating Values");
   int a=btooth.read();
   int b=btooth.read();
+  Serial.println(a);
+  Serial.println(b);
   int dist=tail-head+1;
   if(dist<=0)dist=MAXP;
-  int count=a<<8+b;
-  if(count>MAXP)btooth.write((byte)2);
+  int count=(a<<8)+b;
+  Serial.print("Count:");
+  Serial.println(count);
+  if(count>MAXP)btooth.write((byte)2),    Serial.print("Writing Error:"+2);
   else if(count>dist)btooth.write((byte)1);
   else{
     btooth.write((byte)0);
+    Serial.print("Writing Error:");
+    Serial.println((byte)0);
     while(count--){
           // Serial.println("Writing");
           if(tail-count>=0){
@@ -171,10 +183,10 @@ int rangeValues(){
 if(btooth.available()>3){
   int a=btooth.read();
   int b=btooth.read();
-  int s=a<<8+b;
+  int s=(a<<8)+b;
   a=btooth.read();
   b=btooth.read();
-  int f=a<<8<<b;
+  int f=(a<<8)+b;
   int dist=tail-head+1;
   if(dist<=0)dist=MAXP;
   if(f<s)btooth.write((byte)3);
