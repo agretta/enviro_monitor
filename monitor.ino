@@ -15,40 +15,35 @@ int buff;
 int tail;
 int head;
 int req=0;
-
+int last=0;
 SoftwareSerial btooth(11,10);
 
 void setup() {
     btooth.begin(9600);
     Serial.begin(9600);
-    //attachInterrupt(digitalPinToInterrupt(button), printTemps, CHANGE);
     //reads from EEPROM
-    head=(EEPROM.read(MAXP<<1))*2*2*2*2*2*2*2*2+EEPROM.read(MAXP<<1|1);
-    tail=(EEPROM.read((MAXP<<1)+2))*2*2*2*2*2*2*2*2+EEPROM.read((MAXP<<1)+3);
-  //  debugPrintFromMemory();
+    loadFromMemory();
     buff=0;
 }
 
 //main loop
 void loop() {
-   // Serial.println("Starting Loop");
   //Writes temperature and humidity into RAM
     byte temperature = 0;
     byte humidity = 0;
     byte c=0;
     while(dht11.read(pinDHT11, &temperature, &humidity, NULL)&&c<51) {
-       // Serial.println("Read DHT11 failed.");  
         c++;
     }
     c=0;
+
     
     temps[tail] = temperature;
     humid[tail] = humidity;
-  
     buff++;
-   // Serial.print("buff: ");
+    // Serial.print("buff: ");
     //Serial.println(buff); 
-    //Doesn't write outside of memory by restricting MAXP such that MAXP*2+4<=EEPROM size
+    //Doesn't write outside of memory by restricting MAXP such that MAXP*2+6<=EEPROM size
     
     //Writes tempurature and humidity into memory
     if(buff==BUFFSIZE){
@@ -67,7 +62,8 @@ void loop() {
         EEPROM.update(MAXP<<1|1,(byte)(head));
         EEPROM.update((MAXP<<1)+2,(byte)(tail>>8));
         EEPROM.update((MAXP<<1)+3,(byte)(tail));
-       // Serial.print("Unplug Now");
+        EEPROM.update((MAXP<<1)+4,(byte)(last>>8));
+        EEPROM.update((MAXP<<1)+5,(byte)(last));
      }
     
     
@@ -75,15 +71,9 @@ void loop() {
     btooth.listen();
 
     readCommand();
-    //Serial.print(head);
-    //Serial.print(tail);
-    
-    //button interrupt
+
     delay(PERIOD);
     tail=(tail+1)%MAXP;
-    if(tail==head)head=(tail+1)%MAXP;
-    //printTemps();
-
 }
 
 /*
@@ -109,7 +99,21 @@ void loop() {
  * 5 = user sent range that is greater than what could possibly be read.
  * [a] : Sends all the values that have been read
  * [p] : Returns the reading period in ms, most significant bit first [firstByte][secondByte]
+ * [c] : Returns configuration (every sensor name is two bits)
+ * [l] : Returns all data that hasn't already been sent. This results in undefined behavior if no data has been sent yet or if the buffer has overwritten the last sent value.
  */
+
+void sendData(int err, int s, int f){
+  btooth.write((byte)err);
+  Serial.println("Error is: "+err);
+  while(true){
+    btooth.write(temps[s]);
+    btooth.write(humid[s]);
+    if(s==f){last=s;break;}
+    s=(s+1)%MAXP;
+  }
+}
+
 
 int readCommand(){
 int err;
@@ -121,6 +125,8 @@ if(btooth.available()>0){
   else if(c=='r')err=rangeValues();
   else if(c=='a')err=all();
   else if(c=='p')err=sendPeriod();
+//  else if(c=='c')err=sendConfig();
+  else if(c=='l')err=sendLast();
   else err=10;
   if(err==10){
     btooth.write(10);
@@ -130,53 +136,57 @@ if(btooth.available()>0){
 }
 return 0;
 }
+int sendLast(){
+  sendData(0,last,tail);
+  return 0;
+}
+
 
 int sendPeriod(){
-btooth.write((byte)0);
-int a=PERIOD;
-byte secondbyte=a;
-a=a>>8;
-byte firstbyte=a;
-btooth.write(firstbyte);
-Serial.println(firstbyte);
-btooth.write(secondbyte);
-Serial.println(secondbyte);;
-return 0;
+  btooth.write((byte)0);
+  int a=PERIOD;
+  byte secondbyte=a;
+  a>>=8;
+  byte firstbyte=a;
+  btooth.write(firstbyte);
+  Serial.println(firstbyte);
+  btooth.write(secondbyte);
+  Serial.println(secondbyte);
+  return 0;
 }
 
 int updateValues(){
-if(btooth.available()>1){
-  Serial.println("Updating Values");
-  int a=btooth.read();
-  int b=btooth.read();
-  Serial.println(a);
-  Serial.println(b);
-  int dist=tail-head+1;
-  if(dist<=0)dist=MAXP;
-  int count=(a<<8)+b;
-  Serial.print("Count:");
-  Serial.println(count);
-  if(count>MAXP)btooth.write((byte)2),    Serial.print("Writing Error:"+2);
-  else if(count>dist)btooth.write((byte)1);
-  else{
-    btooth.write((byte)0);
-    Serial.print("Writing Error:");
-    Serial.println((byte)0);
-    while(count--){
-          // Serial.println("Writing");
-          if(tail-count>=0){
-            btooth.write(temps[tail-count]);
-            btooth.write(humid[tail-count]);
+  if(btooth.available()>1){
+    Serial.println("Updating Values");
+    int a=btooth.read();
+    int b=btooth.read();
+    Serial.println(a);
+    Serial.println(b);
+    int dist=tail-head+1;
+    if(dist<=0)dist=MAXP;
+    int count=(a<<8)+b;
+    Serial.print("Count:");
+    Serial.println(count);
+    if(count>MAXP)btooth.write((byte)2);
+    else if(count>dist)btooth.write((byte)1);
+    else{
+      btooth.write((byte)0);
+      Serial.print("Writing Error:");
+      Serial.println((byte)0);
+      while(count--){
+            if(tail-count>=0){
+              btooth.write(temps[tail-count]);
+              btooth.write(humid[tail-count]);
+            }
+            else{
+              btooth.write(temps[tail-count+MAXP]);
+              btooth.write(humid[tail-count+MAXP]);
+            }
           }
-          else{
-            btooth.write(temps[tail-count+MAXP]);
-            btooth.write(humid[tail-count+MAXP]);
-          }
-        }
+    }
+    return 0;
   }
-  return 0;
-}
-else return 10;
+  else return 10;
 }
 
 int rangeValues(){
@@ -193,16 +203,9 @@ if(btooth.available()>3){
   else if(f>=dist)btooth.write((byte)4);
   else if(s<0||f<0)btooth.write((byte)5);
   else{
-    btooth.write((byte)0);
-    bool v=true;
     s=(s+head)%MAXP;
     f=(f+head)%MAXP;
-  while(v){
-    if(s==f)v=false;
-    btooth.write(temps[s]);
-    btooth.write(humid[s]);
-    s=(s+1)%MAXP;
-  }
+    sendData(0,s,f);
   }
   return 0;
 }
@@ -213,22 +216,15 @@ int all(){
 btooth.write((byte)0);
 int h=head;
 int t=tail;
-bool v=true;
-while(v){
-  if(h==t)v=false;
-  btooth.write(temps[h]);
-  btooth.write(humid[h]);
-  h=(h+1)%MAXP; 
-}
+sendData(0,h,t);
 return 0;
 }
 
 
-
-
 void loadFromMemory(){
-    int t=EEPROM.read((MAXP<<1)+2)*2*2*2*2*2*2*2*2+EEPROM.read((MAXP<<1)+3);
-    int r=EEPROM.read(MAXP<<1)*2*2*2*2*2*2*2*2+EEPROM.read(MAXP<<1|1);
+    head=(EEPROM.read(MAXP<<1))*2*2*2*2*2*2*2*2+EEPROM.read(MAXP<<1|1);
+    tail=(EEPROM.read((MAXP<<1)+2))*2*2*2*2*2*2*2*2+EEPROM.read((MAXP<<1)+3);
+    last=(EEPROM.read((MAXP<<1)+4))*2*2*2*2*2*2*2*2+EEPROM.read((MAXP<<1)+5);
     int point=(head-1);
     if(point==-1)point=MAXP-1;
     do{
@@ -256,12 +252,3 @@ void debugPrintFromMemory(){
     }while(point!=tail);
 }
 
-void printTemps() {
-    for(int i = head; i < tail; i++) {
-        Serial.print((int)temps[i]);
-        Serial.print("*C ");
-        Serial.print((int)humid[i]);
-        Serial.print("%|");
-    }
-    Serial.println();
-}
